@@ -2,3 +2,5 @@ downloaded_datasets
 percepted_datasets
 percepted_hard_datasets
 results
+*__pycache__*
+**.pyc

@@ -15,6 +15,8 @@ from dotmap import DotMap
 WORLD_SCALE = 10.
 
 def decode_hdf5_to_frames(hdf, split_index, trial_index,):
+    if isinstance(hdf, str):
+        hdf = h5py.File(hdf, 'r')
     """Decode video frames from a byte stream stored in an HDF5 file by first writing to a temporary file."""
     byte_stream = hdf['video_streams'][split_index][trial_index]
     byte_obj = byte_stream.tobytes()

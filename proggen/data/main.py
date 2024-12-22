@@ -2,28 +2,33 @@
 # coding=utf-8
 
 import os, os.path as osp, sys
+import h5py
+import json
+import numpy as np
+from dotmap import DotMap
+
 from .perception_hard import percept_hard, decode_hdf5_to_frames
 
 def get_dataset_name(name, split):
     if name == 'parabola':
         if split == 'train':
-            self.data_fn = osp.join(curdir, 'downloaded_datasets', 'parabola_30K.hdf5')
+            return 'parabola_30K'
         elif split == 'test':
-            self.data_fn = osp.join(curdir, 'downloaded_datasets', 'parabola_eval.hdf5')
+            return 'parabola_eval'
         else:
             raise ValueError(f'Unknown split: {split} for dataset: {name}')
     elif name == 'uniform_motion':
         if split == 'train':
-            self.data_fn = osp.join(curdir, 'downloaded_datasets', 'uniform_motion_30K.hdf5')
+            return 'uniform_motion_30K'
         elif split == 'test':
-            self.data_fn = osp.join(curdir, 'downloaded_datasets', 'uniform_motion_eval.hdf5')
+            return 'uniform_motion_eval'
         else:
             raise ValueError(f'Unknown split: {split} for dataset: {name}')
     elif name == 'collision':
         if split == 'train':
-            self.data_fn = osp.join(curdir, 'downloaded_datasets', 'collision_30K.hdf5')
+            return 'collision_30K'
         elif split == 'test':
-            self.data_fn = osp.join(curdir, 'downloaded_datasets', 'collision_eval.hdf5')
+            return 'collision_eval'
         else:
             raise ValueError(f'Unknown split: {split} for dataset: {name}')
     else:
@@ -41,7 +46,7 @@ class Dataset:
         split_indexes = data_f['video_streams'].keys()
         indexes = [(si, ti) for si in split_indexes for ti in range(len(data_f['video_streams'][si]))]
         rng = np.random.RandomState(seed)
-        self.indexes = rng.permutation(indexes)
+        self.indexes = [indexes[i] for i in rng.permutation(len(indexes))]
         data_f.close()
     def __len__(self):
         return len(self.indexes)
@@ -71,9 +76,16 @@ class Dataset:
 
         gt_positions = percepted_data['gt_feats'][:percepted_data['bad_index_start']]
         assert len(gt_positions) == len(trajs), f'{len(gt_positions)} != {len(trajs)}'
+
+        frames, fps = decode_hdf5_to_frames(self.data_fn, si, ti)
+        frames = frames[:percepted_data['bad_index_start']]
+        assert len(frames) == len(trajs), f'{len(frames)} != {len(trajs)}'
+
         return {
             'trajs': trajs,
             'gt_positions': gt_positions,
+            'frames': frames,
+            'fps': fps,
         }
     def __iter__(self):
         for i in range(len(self)):
