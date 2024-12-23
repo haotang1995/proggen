@@ -178,14 +178,14 @@ def get_program(dataset):
     else:
         raise ValueError(f'unknown dataset: {dataset}')
     return program
-def predict(trajs_list, program, params, free_init=False):
+def predict(trajs_list, program, params, free_init=False, stride=1):
     pred_trajs_list = []
     for ti, trajs in enumerate(trajs_list):
         if free_init:
-            pred_trajs, params, initial_state_params = program._simulate_from_partial_trajs(params, trajs[:4], FPS, len(trajs)-1,)
+            pred_trajs, params, initial_state_params = program._simulate_from_partial_trajs(params, trajs[:4], FPS, len(trajs)-1, STRIDE=stride,)
         else:
             initial_state_params = program._get_initial_state_params(trajs[:4], FPS,)
-            pred_trajs, params, initial_state_params = program._simulate(params, initial_state_params, trajs[0], FPS, len(trajs)-1,)
+            pred_trajs, params, initial_state_params = program._simulate(params, initial_state_params, trajs[0], FPS, len(trajs)-1, STRIDE=stride,)
         assert len(pred_trajs) == len(trajs)
         pred_trajs_list.append(pred_trajs)
     return pred_trajs_list, params
@@ -198,10 +198,10 @@ def evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False):
         else:
             raise ValueError(f'unsupported object size: {len(trajs_list[0][0])}')
     metrics, vel_err = zip(*[_metrics_fn(tpt, ot, fps=FPS, gt_positions=ogt) for tpt, ot, ogt in zip(pred_trajs_list, trajs_list, gt_positions_list)])
-    metrics = [{k: np.mean([v[k] for v in mm.values()]) for k in list(mm.values())[0].keys()} for mm in metrics]
+    metrics = [{k: np.nanmean([v[k] for v in mm.values()]) for k in list(mm.values())[0].keys()} for mm in metrics]
     vel_err = list(vel_err)
-    metrics = {k: np.mean([mm[k] for mm in metrics]) for k in metrics[0].keys()}
-    vel_err = {k: np.mean([v[k] for v in vel_err]) for k in vel_err[0].keys()}
+    metrics = {k: np.nanmean([mm[k] for mm in metrics]) for k in metrics[0].keys()}
+    vel_err = {k: np.nanmean([v[k] for v in vel_err]) for k in vel_err[0].keys()}
     if verbose:
         pprint(metrics)
         pprint(vel_err)
@@ -215,6 +215,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='collision')
     parser.add_argument('--batch_size', type=int, default=10)
+    parser.add_argument('--stride', type=int, default=1)
     parser.add_argument('--free-init', action='store_true', default=False)
 
     parser.add_argument('--loss_name', type=str, default='mae')
@@ -238,7 +239,7 @@ def main():
 
     curdir = osp.dirname(os.path.abspath(__file__))
     outdir = osp.join(curdir, 'results', osp.basename(__file__).replace('.py', ''))
-    outname = osp.join(outdir, f'{args.dataset}_bs{args.batch_size}' + ('_freeinit' if args.free_init else '') + '.json')
+    outname = osp.join(outdir, f'{args.dataset}_bs{args.batch_size}' + ('_freeinit' if args.free_init else '') + ('_stride%d' % args.stride if args.stride > 1 else '') + '.json')
     os.makedirs(outdir, exist_ok=True)
 
     train_data_list = [train_dataset[i] for i in range(args.batch_size)]
@@ -250,10 +251,10 @@ def main():
 
     set_logger(outname.replace('.json', '.log'))
     if args.free_init:
-        params = program.fit_all(trajs_list, FPS, verbose=True, set_params={}, hyperparams_list=[optim_hyperparams,], batched=True,)
+        params = program.fit_all(trajs_list, FPS, verbose=True, set_params={}, hyperparams_list=[optim_hyperparams,], batched=True, STRIDE=args.stride,)
     else:
-        params = program.fit(trajs_list, FPS, verbose=True, set_params={}, hyperparams_list=[optim_hyperparams,], batched=True,)
-    pred_trajs_list, params = predict(trajs_list, program, params, args.free_init)
+        params = program.fit(trajs_list, FPS, verbose=True, set_params={}, hyperparams_list=[optim_hyperparams,], batched=True, STRIDE=args.stride,)
+    pred_trajs_list, params = predict(trajs_list, program, params, args.free_init, args.stride)
     pprint(params)
     train_metrics = evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False,)
     pprint(train_metrics)
