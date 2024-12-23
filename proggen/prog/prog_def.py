@@ -19,9 +19,9 @@ class FixtureDef:
         assert (categoryBits is None) == (maskBits is None), "categoryBits and maskBits must be both None or both not None"
         out = copy.deepcopy(self)
         out._kwargs = {
-            'density': abs(params.get_params(f'{self.name}_fixture_density')),
-            'friction': abs(params.get_params(f'{self.name}_fixture_friction')) if not self.bounded_friction_restitution else sigmoid(params.get_params(f'{self.name}_fixture_friction')),
-            'restitution': abs(params.get_params(f'{self.name}_fixture_restitution')) if not self.bounded_friction_restitution else sigmoid(params.get_params(f'{self.name}_fixture_restitution')),
+            'density': abs(params.get_params(f'fixture_density')),
+            'friction': abs(params.get_params(f'fixture_friction')) if not self.bounded_friction_restitution else sigmoid(params.get_params(f'fixture_friction')),
+            'restitution': abs(params.get_params(f'fixture_restitution')) if not self.bounded_friction_restitution else sigmoid(params.get_params(f'fixture_restitution')),
         }
         if categoryBits is not None:
             out._kwargs['categoryBits'] = categoryBits

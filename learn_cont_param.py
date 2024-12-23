@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import argparse
 
 from proggen.prog import FixtureDef, BodyDef, JointDef, ContactableGraph
-from proggen.prog import Box2DProgram, ContParams
+from proggen.prog import MetaBox2DProgram, ContParams, Box2DProgram
 from proggen.prog.prog import _metrics_fn
 from proggen.utils.logger import set_logger
 from proggen.utils.render import PygameRender
@@ -148,36 +148,28 @@ def to_serializable(obj):
     if isinstance(obj, dict):
         return {k: to_serializable(v) for k, v in obj.items()}
     return obj
-def get_program(dataset):
-    if dataset in ['uniform_motion', 'parabola']:
-        fixture_names = ['shape0',]
-        fixtures = {
-            fn: FixtureDef(fn, 'circle',)
-            for fn in fixture_names
-        }
-        contactable_graph = ContactableGraph({tuple(sorted([k1, k2])): True for k1, k2 in itertools.product(fixtures.keys(), repeat=2)})
-        print('contactable graph:', {tuple(sorted([k1, k2])) for k1, k2 in itertools.combinations(fixtures.keys(), 2) if contactable_graph.query_category(k1) & contactable_graph.query_mask(k2) and contactable_graph.query_category(k2) & contactable_graph.query_mask(k1)})
-        body_def = {'ball1': BodyDef('ball1', ['shape0'], 'dynamic'),}
-        print('body:', {bn: body.body_type for bn, body in body_def.items()})
-        joint_def = dict()
-        print('joint:', {jn: joint.joint_type for jn, joint in joint_def.items()})
-        program = Box2DProgram(fixtures, contactable_graph, body_def, joint_def)
-    elif dataset in ['collision']:
-        fixture_names = ['shape0', 'shape1']
-        fixtures = {
-            fn: FixtureDef(fn, 'circle',)
-            for fn in fixture_names
-        }
-        contactable_graph = ContactableGraph({tuple(sorted([k1, k2])): True for k1, k2 in itertools.combinations(fixtures.keys(), 2)})
-        print('contactable graph:', {tuple(sorted([k1, k2])) for k1, k2 in itertools.combinations(fixtures.keys(), 2) if contactable_graph.query_category(k1) & contactable_graph.query_mask(k2) and contactable_graph.query_category(k2) & contactable_graph.query_mask(k1)})
-        body_def = {'ball1': BodyDef('ball1', ['shape0'], 'dynamic'), 'ball2': BodyDef('ball2', ['shape1'], 'dynamic')}
-        print('body:', {bn: body.body_type for bn, body in body_def.items()})
-        joint_def = dict()
-        print('joint:', {jn: joint.joint_type for jn, joint in joint_def.items()})
-        program = Box2DProgram(fixtures, contactable_graph, body_def, joint_def)
-    else:
-        raise ValueError(f'unknown dataset: {dataset}')
+def prog_fn(state):
+    fixture_names = set(state.keys())
+    fixtures = {
+        fn: FixtureDef(fn, state[fn]['shape'],)
+        for fn in fixture_names
+    }
+    contactable_graph = ContactableGraph({tuple(sorted([k1, k2])): k1.split('_')[1] != k2.split('_')[1] for k1, k2 in itertools.combinations(fixtures.keys(), 2)})
+    print('contactable graph:', {tuple(sorted([k1, k2])) for k1, k2 in itertools.combinations(sorted(fixtures.keys()), 2) if contactable_graph.query_category(k1) & contactable_graph.query_mask(k2) and contactable_graph.query_category(k2) & contactable_graph.query_mask(k1)})
+    body_names = set(k[:k.rfind('_')] for k in fixtures)
+    body_def = {bn: BodyDef(
+        bn, [k for k in fixtures if k.startswith(bn+'_')],
+        'dynamic' if state[bn+'_0']['color'].lower() in ['gray', 'green', 'blue', 'red'] else 'static'
+    ) for bn in body_names}
+    print('body:', {bn: body.body_type for bn, body in body_def.items()})
+    joint_def = dict()
+    print('joint:', {jn: joint.joint_type for jn, joint in joint_def.items()})
+
+    program = Box2DProgram(fixtures, contactable_graph, body_def, joint_def)
     return program
+
+def get_program():
+    return MetaBox2DProgram()
 def predict(trajs_list, program, params, free_init=False):
     pred_trajs_list = []
     for ti, trajs in enumerate(trajs_list):
@@ -213,7 +205,6 @@ def evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False):
 FPS = 10
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, default='collision')
     parser.add_argument('--batch_size', type=int, default=10)
     parser.add_argument('--free-init', action='store_true', default=False)
 

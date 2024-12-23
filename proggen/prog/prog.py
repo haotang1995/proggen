@@ -79,6 +79,70 @@ class ContParams:
                 out.params[i] = v
         return out
 
+class MetaBox2DProgram:
+    def __init__(self, prog_fn):
+        self.prog_fn = prog_fn
+    def _simulate(self, params, initial_state_params, initial_state, fps, max_time_steps, STRIDE=1, set_params=None, set_initial_state_params=None,):
+        prog = self.prog_fn(initial_state,)
+        return prog._simulate(params, initial_state_params, initial_state, fps, max_time_steps, STRIDE=STRIDE, set_params=set_params, set_initial_state_params=set_initial_state_params,)
+    def _simulate_from_partial_trajs(self, params, partial_trajs, fps, max_time_steps, STRIDE=1, set_params=None, set_initial_state_params=None, nofit=False, oracle_nofit=False,):
+        prog = self.prog_fn(partial_trajs[0],)
+        return prog._simulate_from_partial_trajs(params, partial_trajs, fps, max_time_steps, STRIDE=STRIDE, set_params=set_params, set_initial_state_params=set_initial_state_params, nofit=nofit, oracle_nofit=oracle_nofit,)
+    def _get_initial_state_params(self, partial_trajs, fps, oracle_nofit=False,):
+        prog = self.prog_fn(partial_trajs[0],)
+        return prog._get_initial_state_params(partial_trajs, fps, oracle_nofit=oracle_nofit,)
+    def fit(self, trajs, fps, hyperparams_list=({
+        'max_tries': 100,
+        'maxiter': int(1e5),
+        'early_stop_threshold': 0.1,
+        'loss_name': 'mse',
+        'optimizer': 'Nelder-Mead',
+    },), verbose=False, STRIDE=1, set_params=None, set_initial_state_params=None, nofit=True, oracle_nofit=False, batched=False, iter_rollout=False,):
+        if not batched and not iter_rollout:
+            cur_loss_fn = _loss_fn_on_params
+        elif batched and not iter_rollout:
+            cur_loss_fn = _loss_fn_on_params_batched
+        else:
+            raise NotImplementedError
+
+        best_loss, best_params = 100, None
+        for hyperparams in hyperparams_list:
+            params = _fit(cur_loss_fn, (self, trajs, fps, hyperparams['loss_name'], STRIDE, set_params, set_initial_state_params, nofit, oracle_nofit), verbose=verbose, **{k: v for k, v in hyperparams.items() if k != 'loss_name'})
+            loss = cur_loss_fn(params, self, trajs, fps, 'mse', nofit=nofit, oracle_nofit=oracle_nofit) # TODO: Set one unified loss function
+            if loss < best_loss:
+                best_loss = loss
+                best_params = params
+        return best_params
+    def fit_all(self, trajs, fps, hyperparams_list=({
+        'max_tries': 100,
+        'maxiter': int(1e5),
+        'early_stop_threshold': 0.1,
+        'loss_name': 'mse',
+        'optimizer': 'Nelder-Mead',
+    },), verbose=False, STRIDE=1, set_params=None, set_initial_state_params=None, batched=False, iter_rollout=False,):
+        best_loss, best_params = 100, None
+        if not batched and not iter_rollout:
+            cur_loss_fn = _loss_fn_on_all
+        elif batched and not iter_rollout:
+            cur_loss_fn = _loss_fn_on_all_batched
+        else:
+            raise NotImplementedError
+        if not batched and not iter_rollout:
+            initial_state_params = self._get_initial_state_params(trajs, fps,)
+        elif batched and not iter_rollout:
+            assert isinstance(trajs, list) and isinstance(trajs[0], list), trajs
+            initial_state_params_list = [self._get_initial_state_params(traj, fps,) for traj in trajs]
+            initial_state_params = ContParams(np.concatenate([isp.params for isp in initial_state_params_list]))
+        else:
+            raise NotImplementedError
+        for hyperparams in hyperparams_list:
+            initial_params = np.concatenate((np.random.rand(RANDOM_PARAM_NUM), initial_state_params.params))
+            params = _fit(cur_loss_fn, (self, trajs, fps, hyperparams['loss_name'], STRIDE, set_params, set_initial_state_params), verbose=verbose, **{k: v for k, v in hyperparams.items() if k != 'loss_name'}, initial_params=initial_params)
+            loss = cur_loss_fn(params, self, trajs, fps, 'mse') # TODO: Set one unified loss function
+            if loss < best_loss:
+                best_loss = loss
+                best_params = params
+        return best_params
 class Box2DProgram:
     def __init__(
         self,
