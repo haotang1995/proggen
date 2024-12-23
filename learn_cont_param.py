@@ -78,6 +78,60 @@ def plot_trajs_diff(trajs, pred_trajs, gt_positions):
     axes[1,1].set_xlabel('t')
     axes[1,1].set_ylabel('vx_err')
     plt.show()
+def plot_trajs_diff_collision(trajs, pred_trajs, gt_positions):
+    H, W = 2, 2
+    fig, axes = plt.subplots(H, W, figsize=(H*5, W*5))
+    mae0, mae1 = 0, 0
+    pred_post_vel_err_avg, gt_post_vel_err_avg = 0, 0
+    pred_post_vel_error, gt_post_vel_error = 0, 0
+    for oi, obj in enumerate(sorted(trajs[0])):
+        gt = np.array([s[obj]['position'] for s in trajs])
+        pred = np.array([s[obj]['position'] for s in pred_trajs])
+        gt_pos = np.array([s[oi] for s in gt_positions])
+        axes[0,0].plot(gt[:, 0], gt[:, 1], 'rx-')
+        axes[0,0].plot(pred[:, 0], pred[:, 1], 'bx-')
+        axes[0,0].plot(gt_pos[:, 0], gt_pos[:, 1], 'gx-')
+        mae0 += np.mean(np.abs(gt[1:,0] - pred[1:,0]))
+        mae1 += np.mean(np.abs(gt[1:,1] - pred[1:,1]))
+
+        axes[0,1].plot(gt[:,0], 'rx-')
+        axes[0,1].plot(pred[:,0], 'bx-')
+        axes[0,1].plot(gt_pos[:,0], 'gx-')
+
+        gt_vel = np.diff(gt, axis=0) * FPS
+        pred_vel = np.diff(pred, axis=0) * FPS
+        gt_pos_vel = np.diff(gt_pos, axis=0) * FPS
+        axes[1,0].plot(gt_vel[:,0], 'rx-')
+        axes[1,0].plot(pred_vel[:,0], 'bx-')
+        axes[1,0].plot(gt_pos_vel[:,0], 'gx-')
+        gt_vel_err = np.abs(gt_pos_vel[:,0] - gt_vel[:,0])
+        pred_vel_err = np.abs(pred_vel[:,0] - gt_vel[:,0])
+        axes[1,1].plot(gt_vel_err, 'rx-')
+        axes[1,1].plot(pred_vel_err, 'bx-')
+        axes[1,1].set_ylim(0, 0.5)
+        pred_post_vel_err_avg += np.mean(np.abs(pred_vel[9:,0] - gt_pos_vel[9:,0]))
+        gt_post_vel_err_avg += np.mean(np.abs(gt_vel[9:,0] - gt_pos_vel[9:,0]))
+        pred_post_vel_error += np.abs(pred_vel[9:,0].mean() - gt_pos_vel[9:,0].mean())
+        gt_post_vel_error += np.abs(gt_vel[9:,0].mean() - gt_pos_vel[9:,0].mean())
+    mae0 /= len(trajs[0])
+    mae1 /= len(trajs[0])
+    mae = (mae0 + mae1) / 2
+    axes[0,0].set_title(f'mae: {mae:.4f}; mae0: {mae0:.4f}; mae1: {mae1:.4f}')
+    axes[0,0].set_xlabel('x')
+    axes[0,0].set_ylabel('y')
+    axes[0,1].set_xlabel('t')
+    axes[0,1].set_ylabel('x')
+    axes[1,0].set_xlabel('t')
+    axes[1,0].set_ylabel('vx')
+    pred_post_vel_err_avg /= len(trajs[0])
+    gt_post_vel_err_avg /= len(trajs[0])
+    pred_post_vel_error /= len(trajs[0])
+    gt_post_vel_error /= len(trajs[0])
+    axes[1,1].set_title(f'pred_post_vel_err_avg: {pred_post_vel_err_avg:.4f}, gt_post_vel_err_avg: {gt_post_vel_err_avg:.4f}\n'
+                        f'pred_post_vel_error: {pred_post_vel_error:.4f}, gt_post_vel_error: {gt_post_vel_error:.4f}')
+    axes[1,1].set_xlabel('t')
+    axes[1,1].set_ylabel('vx_err')
+    plt.show()
 def to_serializable(obj):
     if isinstance(obj, DotMap):
         return to_serializable(obj.toDict())
@@ -137,7 +191,12 @@ def predict(trajs_list, program, params, free_init=False):
     return pred_trajs_list, params
 def evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False):
     if verbose:
-        plot_trajs_diff(trajs_list[0], pred_trajs_list[0], gt_positions_list[0])
+        if len(trajs_list[0][0]) == 1:
+            plot_trajs_diff(trajs_list[0], pred_trajs_list[0], gt_positions_list[0])
+        elif len(trajs_list[0][0]) == 2:
+            plot_trajs_diff_collision(trajs_list[0], pred_trajs_list[0], gt_positions_list[0])
+        else:
+            raise ValueError(f'unsupported object size: {len(trajs_list[0][0])}')
     metrics, vel_err = zip(*[_metrics_fn(tpt, ot, fps=FPS, gt_positions=ogt) for tpt, ot, ogt in zip(pred_trajs_list, trajs_list, gt_positions_list)])
     metrics = [{k: np.mean([v[k] for v in mm.values()]) for k in list(mm.values())[0].keys()} for mm in metrics]
     vel_err = list(vel_err)
@@ -195,6 +254,7 @@ def main():
     else:
         params = program.fit(trajs_list, FPS, verbose=True, set_params={}, hyperparams_list=[optim_hyperparams,], batched=True,)
     pred_trajs_list, params = predict(trajs_list, program, params, args.free_init)
+    pprint(params)
     train_metrics = evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False,)
     pprint(train_metrics)
 

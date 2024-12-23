@@ -7,6 +7,8 @@ import numpy as np
 from scipy.optimize import minimize
 from Box2D import b2World, b2Vec2, b2Transform
 
+from .prog_def import sigmoid
+
 RANDOM_PARAM_NUM = 20
 class ContParams:
     def __init__(self, params, name2indices=None, index=None):
@@ -52,9 +54,14 @@ class ContParams:
         return tuple(self.name2indices[name])
     def __str__(self):
         return str({
-            k: self.params[v[0]] if len(v) == 1 else [self.params[vi] for vi in v]
+            k: self._vis_param(k, self.params[v[0]]) if len(v) == 1 else [self.params[vi] for vi in v]
             for k, v in self.name2indices.items()
         })
+    def _vis_param(self, name, param):
+        # Assuming always bounded_friction_restitution
+        if 'friction' in name or 'restitution' in name:
+            return sigmoid(param)
+        return param
     def __repr__(self):
         return str(self)
     def dumps(self,):
