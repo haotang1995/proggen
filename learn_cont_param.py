@@ -1,28 +1,22 @@
 #!/usr/bin/env python
 # coding=utf-8
 
-import os, os.path as osp, sys
-sys.path.append(osp.abspath(osp.join(osp.dirname(__file__), '..')))
-
-import copy
+import os, os.path as osp
 import itertools
 import json
 from pprint import pprint
-import time
-import h5py
 from dotmap import DotMap
 
-import random
 import numpy as np
 import matplotlib.pyplot as plt
-import gymnasium as gym
 import argparse
 
-from prog_def import FixtureDef, BodyDef, JointDef, ContactableGraph
-from prog import Box2DProgram, ContParams, _metrics_fn, _decode_loss
-from logger import set_logger
-from _render import PygameRender
-from perception_hard import percept_hard
+from proggen.prog import FixtureDef, BodyDef, JointDef, ContactableGraph
+from proggen.prog import Box2DProgram, ContParams
+from proggen.prog.prog import _metrics_fn
+from proggen.utils.logger import set_logger
+from proggen.utils.render import PygameRender
+from proggen.data import Dataset
 
 def render_trajs(trajs):
     render = PygameRender(FPS, 256, 256, 256/10.)
@@ -99,190 +93,112 @@ def to_serializable(obj):
     if isinstance(obj, dict):
         return {k: to_serializable(v) for k, v in obj.items()}
     return obj
-def fit(trajs_list, other_trajs, gt_positions_list, other_gt_positions, outname, hyperparams, oracle_nofit=False, bounded_friction_restitution=False,):
-    set_logger(outname.replace('.json', '.log'))
-    fixture_names = set(k for obs in trajs_list[0] for k in obs)
-    fixtures = {
-        fn: FixtureDef(fn, trajs_list[0][0][fn]['shape'], bounded_friction_restitution=bounded_friction_restitution,)
-        for fn in fixture_names
-    }
-    contactable_graph = ContactableGraph({tuple(sorted([k1, k2])): True for k1, k2 in itertools.product(fixtures.keys(), repeat=2)})
-    print('contactable graph:', {tuple(sorted([k1, k2])) for k1, k2 in itertools.combinations(fixtures.keys(), 2) if contactable_graph.query_category(k1) & contactable_graph.query_mask(k2) and contactable_graph.query_category(k2) & contactable_graph.query_mask(k1)})
-    body_def = {'ball1': BodyDef('ball1', ['shape0'], 'dynamic'),}
-    print('body:', {bn: body.body_type for bn, body in body_def.items()})
-    joint_def = dict()
-    print('joint:', {jn: joint.joint_type for jn, joint in joint_def.items()})
-    program = Box2DProgram(fixtures, contactable_graph, body_def, joint_def)
-
-    fit_params = True
-    # fit_params = False
-    # nofit = True
-    nofit = True
-    # oracle_nofit=False
-    # oracle_nofit=True
-    nofit = nofit or oracle_nofit
-    # hyperparams['maxiter'] = 1
-    if fit_params:
-        if nofit:
-            params = program.fit(trajs_list, FPS, verbose=True, set_params={}, hyperparams_list=[hyperparams,], nofit=nofit, oracle_nofit=oracle_nofit, batched=True,)
-            initial_state_params_list = [program._get_initial_state_params(trajs, FPS, oracle_nofit=oracle_nofit,) for trajs in trajs_list]
-        else:
-            params = program.fit_all(trajs_list, FPS, verbose=True, set_params={}, hyperparams_list=[hyperparams,], batched=True,)
-            initial_state_params_list = [params[i*params.shape[0]//(len(trajs_list) + 1):(i+1)*params.shape[0]//(len(trajs_list) + 1)] for i in range(len(trajs_list))]
-            params = params[:params.shape[0]//(len(trajs_list) + 1)]
-            params = ContParams(params)
-            initial_state_params_list = [ContParams(initial_state_params) for initial_state_params in initial_state_params_list]
-
-        # params = program.fit([trajs] + other_trajs[:3], FPS, verbose=True, set_params={},
-                            # hyperparams_list=[hyperparams,], batched=True)
-        # other_trajs = other_trajs[3:]
-        # other_gt_positions = other_gt_positions[3:]
-
+def get_program(dataset):
+    if dataset in ['uniform_motion', 'parabola']:
+        fixture_names = ['shape0',]
+        fixtures = {
+            fn: FixtureDef(fn, 'circle',)
+            for fn in fixture_names
+        }
+        contactable_graph = ContactableGraph({tuple(sorted([k1, k2])): True for k1, k2 in itertools.product(fixtures.keys(), repeat=2)})
+        print('contactable graph:', {tuple(sorted([k1, k2])) for k1, k2 in itertools.combinations(fixtures.keys(), 2) if contactable_graph.query_category(k1) & contactable_graph.query_mask(k2) and contactable_graph.query_category(k2) & contactable_graph.query_mask(k1)})
+        body_def = {'ball1': BodyDef('ball1', ['shape0'], 'dynamic'),}
+        print('body:', {bn: body.body_type for bn, body in body_def.items()})
+        joint_def = dict()
+        print('joint:', {jn: joint.joint_type for jn, joint in joint_def.items()})
+        program = Box2DProgram(fixtures, contactable_graph, body_def, joint_def)
+    elif dataset in ['collision']:
+        raise NotImplementedError
     else:
-        params = ContParams(np.random.rand(1000))
-        params.insert_param('gravity', (0., 0.))
-        params.insert_param('shape0_fixture_density', (1.0,))
-        params.insert_param('shape0_fixture_friction', (0.2,))
-        params.insert_param('shape0_fixture_restitution', (1.,))
-        params.insert_param('shape1_fixture_density', (1.0,))
-        params.insert_param('shape1_fixture_friction', (0.2,))
-        params.insert_param('shape1_fixture_restitution', (1.,))
-        if nofit:
-            initial_state_params = [program._get_initial_state_params(trajs, FPS, oracle_nofit=oracle_nofit) for trajs in trajs_list]
-        else:
-            initial_state_params = []
-            for trajs in trajs_list:
-                pred_trajs, params, initial_state_params = program._simulate_from_partial_trajs(params, trajs, FPS, len(trajs)-1,)
-                initial_state_params_list.append(initial_state_params)
-
-    train_pred_trajs = []
+        raise ValueError(f'unknown dataset: {dataset}')
+    return program
+def predict(trajs_list, program, params, free_init=False):
+    pred_trajs_list = []
     for ti, trajs in enumerate(trajs_list):
-        pred_trajs, params, initial_state_params = program._simulate(params, initial_state_params_list[ti], trajs[0], FPS, len(trajs)-1,)
-        train_pred_trajs.append(pred_trajs)
-        initial_state_params_list[ti] = initial_state_params
-    # train_pred_trajs = [program._simulate(params, initial_state_params, trajs[0], FPS, len(trajs)-1,) for trajs, initial_state_params in zip(trajs_list, initial_state_params_list)]
-    print(params)
-    print(initial_state_params_list)
-    train_metrics, train_vel_err = zip(*[_metrics_fn(tpt, ot, fps=FPS, gt_positions=ogt) for tpt, ot, ogt in zip(train_pred_trajs, trajs_list, gt_positions_list)])
-    train_metrics = [{k: np.mean([v[k] for v in mm.values()]) for k in list(mm.values())[0].keys()} for mm in train_metrics]
-    train_vel_err = list(train_vel_err)
-    pprint({k: np.mean([mm[k] for mm in train_metrics]) for k in train_metrics[0].keys()})
-    pprint({k: np.mean([v[k] for v in train_vel_err]) for k in train_vel_err[0].keys()})
-    print([ve['percepted_pred_vel_error'] for ve in train_vel_err], np.mean([ve['percepted_pred_vel_error'] for ve in train_vel_err]))
-    plot_trajs_diff(trajs_list[0], train_pred_trajs[0], gt_positions_list[0])
-    # assert False
-    test_pred_trajs = [program._simulate_from_partial_trajs(params, ot, FPS, len(ot)-1, nofit=nofit, oracle_nofit=oracle_nofit)[0] for ot in other_trajs]
-    test_metrics = [_metrics_fn(tpt, ot, fps=FPS, gt_positions=ogt) for tpt, ot, ogt in zip(test_pred_trajs, other_trajs, other_gt_positions)]
-    test_metrics, test_vel_err = zip(*test_metrics)
-    test_metrics = [{k: np.mean([v[k] for v in mm.values()]) for k in list(mm.values())[0].keys()} for mm in test_metrics]
-    test_vel_err = list(test_vel_err)
-    pprint({k: np.mean([v[k] for v in test_vel_err]) for k in test_vel_err[0].keys()})
-    assert len(test_vel_err) == 9, len(test_vel_err)
-    print([ve['percepted_pred_vel_error'] for ve in test_vel_err], np.mean([ve['percepted_pred_vel_error'] for ve in test_vel_err]))
+        if free_init:
+            pred_trajs, params, initial_state_params = program._simulate_from_partial_trajs(params, trajs[:4], FPS, len(trajs)-1,)
+        else:
+            initial_state_params = program._get_initial_state_params(trajs[:4], FPS,)
+            pred_trajs, params, initial_state_params = program._simulate(params, initial_state_params, trajs[0], FPS, len(trajs)-1,)
+        assert len(pred_trajs) == len(trajs)
+        pred_trajs_list.append(pred_trajs)
+    return pred_trajs_list, params
+def evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False):
+    if verbose:
+        plot_trajs_diff(trajs_list[0], pred_trajs_list[0], gt_positions_list[0])
+    metrics, vel_err = zip(*[_metrics_fn(tpt, ot, fps=FPS, gt_positions=ogt) for tpt, ot, ogt in zip(pred_trajs_list, trajs_list, gt_positions_list)])
+    metrics = [{k: np.mean([v[k] for v in mm.values()]) for k in list(mm.values())[0].keys()} for mm in metrics]
+    vel_err = list(vel_err)
+    metrics = {k: np.mean([mm[k] for mm in metrics]) for k in metrics[0].keys()}
+    vel_err = {k: np.mean([v[k] for v in vel_err]) for k in vel_err[0].keys()}
+    if verbose:
+        pprint(metrics)
+        pprint(vel_err)
+    return {
+        'metrics': metrics,
+        'vel_err': vel_err,
+    }
 
+FPS = 10
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='collision')
+    parser.add_argument('--batch_size', type=int, default=10)
+    parser.add_argument('--free-init', action='store_true', default=False)
+
+    parser.add_argument('--loss_name', type=str, default='mae')
+    parser.add_argument('--early_stop_threshold', type=float, default=0.1)
+    parser.add_argument('--optimizer', type=str, default='Powell')
+    parser.add_argument('--maxiter', type=int, default=int(1e7))
+    parser.add_argument('--max_tries', type=int, default=10)
+
+    args = parser.parse_args()
+
+    train_dataset = Dataset(args.dataset, 'train', seed=0)
+    test_dataset = Dataset(args.dataset, 'test', seed=0)
+
+    optim_hyperparams = {
+        'loss_name': args.loss_name,
+        'early_stop_threshold': args.early_stop_threshold,
+        'optimizer': args.optimizer,
+        'maxiter': args.maxiter,
+        'max_tries': args.max_tries,
+    }
+
+    curdir = osp.dirname(os.path.abspath(__file__))
+    outdir = osp.join(curdir, 'results', osp.basename(__file__).replace('.py', ''))
+    outname = osp.join(outdir, f'{args.dataset}_bs{args.batch_size}' + ('_freeinit' if args.free_init else '') + '.json')
+    os.makedirs(outdir, exist_ok=True)
+
+    train_data_list = [train_dataset[i] for i in range(args.batch_size)]
+    trajs_list, gt_positions_list = zip(*([(data['trajs'], data['gt_positions']) for data in train_data_list]))
+    trajs_list = list(trajs_list)
+    gt_positions_list = list(gt_positions_list)
+
+    program = get_program(args.dataset)
+
+    set_logger(outname.replace('.json', '.log'))
+    if args.free_init:
+        params = program.fit_all(trajs_list, FPS, verbose=True, set_params={}, hyperparams_list=[optim_hyperparams,], batched=True,)
+    else:
+        params = program.fit(trajs_list, FPS, verbose=True, set_params={}, hyperparams_list=[optim_hyperparams,], batched=True,)
+    pred_trajs_list, params = predict(trajs_list, program, params, args.free_init)
+    train_metrics = evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False,)
+    pprint(train_metrics)
+
+    test_data_list = [test_dataset[i] for i in range(len(test_dataset))]
+    trajs_list, gt_positions_list = zip(*([(data['trajs'], data['gt_positions']) for data in test_data_list]))
+    trajs_list = list(trajs_list)
+    gt_positions_list = list(gt_positions_list)
+    pred_trajs_list, _ = predict(trajs_list, program, params, args.free_init)
+    test_metrics = evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False,)
+    pprint(test_metrics)
     with open(outname, 'w') as f:
         json.dump({
             'params': params.dumps(),
             'train_metrics': train_metrics,
             'test_metrics': test_metrics,
-            'train_trajs': to_serializable(trajs),
-            'other_trajs': to_serializable(other_trajs),
         }, f, indent=2)
-
-    assert False
-
-FPS = 10
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--batch_size', type=int, default=10)
-    parser.add_argument('--oracle_nofit', action='store_true')
-    parser.add_argument('--bound_fix_res', action='store_true')
-    args = parser.parse_args()
-
-    curdir = osp.dirname(os.path.abspath(__file__))
-    data_fn = osp.join(curdir, 'downloaded_datasets', 'parabola_30K.hdf5')
-    assert osp.exists(data_fn)
-    data_f = h5py.File(data_fn, 'r')
-    split_indexes = data_f['video_streams'].keys()
-    indexes = [(si, ti) for si in split_indexes for ti in range(len(data_f['video_streams'][si]))]
-
-    rng = np.random.RandomState(0)
-    _indexes = [indexes[i] for i in rng.choice(len(indexes), 10, replace=False)]
-    _left_indexes = [i for i in indexes if i not in _indexes]
-    batched_indexes = [_left_indexes[j] for j in rng.choice(len(_left_indexes), 100, replace=False)]
-    _left_indexes = [i for i in _left_indexes if i not in batched_indexes]
-    rng.shuffle(_left_indexes)
-    batched_indexes = batched_indexes + _left_indexes
-    indexes = _indexes + batched_indexes[:args.batch_size]
-    assert len(indexes) == 10 + args.batch_size
-
-    percepted_data_fn = osp.join(curdir, 'percepted_hard_datasets', 'parabola_30K_percepted')
-    percepted_data_list = []
-    for si, ti in indexes:
-        if osp.exists(percepted_data_fn + '.json'):
-            with open(percepted_data_fn + '.json', 'r') as f:
-                percepted_data = json.load(f)[si][ti]
-        elif osp.exists(percepted_data_fn + f'_{si}.json'):
-            with open(percepted_data_fn + f'_{si}.json', 'r') as f:
-                percepted_data = json.load(f)[ti]
-        elif osp.exists(percepted_data_fn + f'_{si}_{ti}.json'):
-            with open(percepted_data_fn + f'_{si}_{ti}.json', 'r') as f:
-                percepted_data = json.load(f)
-        else:
-            percept_hard(osp.basename(data_fn), si, ti,)
-            with open(percepted_data_fn + f'_{si}_{ti}.json', 'r') as f:
-                percepted_data = json.load(f)
-            # raise FileNotFoundError(percepted_data_fn + f'_{si}_{ti}.json')
-        percepted_data_list.append(percepted_data)
-
-    gt_positions_list = []
-    trajs_list = []
-    for data in percepted_data_list:
-        obj_list = {c for sps in data['shapes'] for c in sps}
-        obj2name = {obj: f'shape{i}' for i, obj in enumerate(sorted(obj_list))}
-        avg_radius = {obj: np.mean([s[obj]['radius'] for s in data['shapes'][:data['bad_index_start']]]) for obj in obj_list}
-        trajs = []
-        for sps in data['shapes'][:data['bad_index_start']]:
-            state = {obj2name[obj]: {
-                'position': s['position'],
-                'angle': 0,
-                'shape': 'circle',
-                'radius': avg_radius[obj],
-                'velocity': None,
-                'angular_velocity': None,
-            } for obj, s in sps.items()}
-            trajs.append(DotMap(state, _dynamic=False))
-        trajs_list.append(trajs)
-
-        gt_positions = data['gt_feats'][:data['bad_index_start']]
-        assert len(gt_positions) == len(trajs), f'{len(gt_positions)} != {len(trajs)}'
-        gt_positions_list.append(gt_positions)
-    assert len(trajs_list) == 10 + args.batch_size, len(trajs_list)
-
-
-    hyperparams_list = {
-        'mae_powell': {
-            'loss_name': 'mae',
-            'early_stop_threshold': 0.1,
-            'optimizer': 'Powell',
-            'maxiter': int(1e7),
-            'max_tries': 10,},
-    }
-
-    outdir = osp.join(curdir, 'results', osp.basename(__file__).replace('.py', ''))
-    os.makedirs(outdir, exist_ok=True)
-
-    for ti in range(0, 10):
-        other_trajs = trajs_list[:ti] + trajs_list[ti+1:10]
-        trajs_list = [trajs_list[ti],] + trajs_list[10:]
-        other_gt_positions = gt_positions_list[:ti] + gt_positions_list[ti+1:]
-        gt_positions_list = [gt_positions_list[ti],] + gt_positions_list[10:]
-        for hyperparams_name, hyperparams in hyperparams_list.items():
-            outname = osp.join(outdir, f'{ti}_{hyperparams_name}.json')
-            # if osp.exists(outname):
-                # continue
-            assert len(other_trajs) == 9, len(other_trajs)
-            fit(trajs_list, other_trajs, gt_positions_list, other_gt_positions, outname, hyperparams, oracle_nofit=args.oracle_nofit, bounded_friction_restitution=args.bound_fix_res,)
 
 if __name__ == '__main__':
     main()
