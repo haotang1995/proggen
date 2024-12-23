@@ -34,7 +34,7 @@ def get_dataset_name(name, split):
     else:
         raise ValueError(f'Unknown dataset: {name}')
 class Dataset:
-    def __init__(self, name, split, seed=0):
+    def __init__(self, name, split, seed=0, novideo=False,):
         curdir = osp.dirname(os.path.abspath(__file__))
         name = get_dataset_name(name, split)
         self.data_fn = osp.join(curdir, 'downloaded_datasets', f'{name}.hdf5')
@@ -48,13 +48,20 @@ class Dataset:
         rng = np.random.RandomState(seed)
         self.indexes = [indexes[i] for i in rng.permutation(len(indexes))]
         data_f.close()
+        self.novideo = novideo
     def __len__(self):
         return len(self.indexes)
     def __getitem__(self, i):
         si, ti = self.indexes[i]
         if osp.exists(self.percepted_data_fn + f'_{si}_{ti}.json'):
-            with open(self.percepted_data_fn + f'_{si}_{ti}.json', 'r') as f:
-                percepted_data = json.load(f)
+            try:
+                with open(self.percepted_data_fn + f'_{si}_{ti}.json', 'r') as f:
+                    percepted_data = json.load(f)
+            except:
+                os.remove(self.percepted_data_fn + f'_{si}_{ti}.json')
+                percept_hard(osp.basename(self.data_fn), si, ti,)
+                with open(self.percepted_data_fn + f'_{si}_{ti}.json', 'r') as f:
+                    percepted_data = json.load(f)
         else:
             percept_hard(osp.basename(self.data_fn), si, ti,)
             with open(self.percepted_data_fn + f'_{si}_{ti}.json', 'r') as f:
@@ -76,6 +83,12 @@ class Dataset:
 
         gt_positions = percepted_data['gt_feats'][:percepted_data['bad_index_start']]
         assert len(gt_positions) == len(trajs), f'{len(gt_positions)} != {len(trajs)}'
+
+        if self.novideo:
+            return {
+                'trajs': trajs,
+                'gt_positions': gt_positions,
+            }
 
         frames, fps = decode_hdf5_to_frames(self.data_fn, si, ti)
         frames = frames[:percepted_data['bad_index_start']]

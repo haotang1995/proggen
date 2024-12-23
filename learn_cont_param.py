@@ -24,6 +24,7 @@ def render_trajs(trajs):
         render.render(s)
     render.close()
 def plot_trajs_diff(trajs, pred_trajs, gt_positions):
+    assert len(trajs[0]) == 1, 'only support single object'
     H, W = 2, 2
     fig, axes = plt.subplots(H, W, figsize=(H*5, W*5))
     mae0, mae1 = 0, 0
@@ -108,7 +109,18 @@ def get_program(dataset):
         print('joint:', {jn: joint.joint_type for jn, joint in joint_def.items()})
         program = Box2DProgram(fixtures, contactable_graph, body_def, joint_def)
     elif dataset in ['collision']:
-        raise NotImplementedError
+        fixture_names = ['shape0', 'shape1']
+        fixtures = {
+            fn: FixtureDef(fn, 'circle',)
+            for fn in fixture_names
+        }
+        contactable_graph = ContactableGraph({tuple(sorted([k1, k2])): True for k1, k2 in itertools.combinations(fixtures.keys(), 2)})
+        print('contactable graph:', {tuple(sorted([k1, k2])) for k1, k2 in itertools.combinations(fixtures.keys(), 2) if contactable_graph.query_category(k1) & contactable_graph.query_mask(k2) and contactable_graph.query_category(k2) & contactable_graph.query_mask(k1)})
+        body_def = {'ball1': BodyDef('ball1', ['shape0'], 'dynamic'), 'ball2': BodyDef('ball2', ['shape1'], 'dynamic')}
+        print('body:', {bn: body.body_type for bn, body in body_def.items()})
+        joint_def = dict()
+        print('joint:', {jn: joint.joint_type for jn, joint in joint_def.items()})
+        program = Box2DProgram(fixtures, contactable_graph, body_def, joint_def)
     else:
         raise ValueError(f'unknown dataset: {dataset}')
     return program
@@ -154,8 +166,8 @@ def main():
 
     args = parser.parse_args()
 
-    train_dataset = Dataset(args.dataset, 'train', seed=0)
-    test_dataset = Dataset(args.dataset, 'test', seed=0)
+    train_dataset = Dataset(args.dataset, 'train', seed=0, novideo=True,)
+    test_dataset = Dataset(args.dataset, 'test', seed=0, novideo=True,)
 
     optim_hyperparams = {
         'loss_name': args.loss_name,
@@ -187,6 +199,7 @@ def main():
     pprint(train_metrics)
 
     test_data_list = [test_dataset[i] for i in range(len(test_dataset))]
+    print(f'Test data size: {len(test_data_list)}')
     trajs_list, gt_positions_list = zip(*([(data['trajs'], data['gt_positions']) for data in test_data_list]))
     trajs_list = list(trajs_list)
     gt_positions_list = list(gt_positions_list)
