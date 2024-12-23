@@ -84,10 +84,23 @@ class Dataset:
         gt_positions = percepted_data['gt_feats'][:percepted_data['bad_index_start']]
         assert len(gt_positions) == len(trajs), f'{len(gt_positions)} != {len(trajs)}'
 
+        gt_inits = percepted_data['gt_init']
+        if 'collision' in self.data_fn:
+            split = split_indices_collision(gt_inits)
+        elif 'parabola' in self.data_fn:
+            split = split_indices_parabola(gt_inits)
+        elif 'uniform_motion' in self.data_fn:
+            split = split_indices_uniform(gt_inits)
+        else:
+            raise ValueError(f'Unknown dataset: {self.data_fn}')
+
+
         if self.novideo:
             return {
                 'trajs': trajs,
                 'gt_positions': gt_positions,
+                'gt_inits': gt_inits,
+                'split': split,
             }
 
         frames, fps = decode_hdf5_to_frames(self.data_fn, si, ti)
@@ -97,9 +110,76 @@ class Dataset:
         return {
             'trajs': trajs,
             'gt_positions': gt_positions,
+            'gt_inits': gt_inits,
+            'split': split,
             'frames': frames,
             'fps': fps,
         }
     def __iter__(self):
         for i in range(len(self)):
             yield self[i]
+
+# Copied from Phyworld
+# https://raw.githubusercontent.com/phyworld/phyworld/e92934249ecd5a9ffbb587017dbd5be33593f4da/id_ood_data/evaluate.py
+def split_indices_uniform(init):
+    MIN_V = 1.0
+    MAX_V = 4.0
+    MIN_R = 0.7
+    MAX_R = 1.4
+    if init[0] < 0.6: # filter out dispearing balls
+        return 'invalid'
+    if init[1] == 0: #! (r, v)
+        return 'zero'
+    elif MIN_R <= init[0] <= MAX_R and MIN_V <= init[1] <= MAX_V:
+        return 'in'
+    elif not (MIN_R <= init[0] <= MAX_R) and MIN_V <= init[1] <= MAX_V:
+        return 'r_out'
+    elif (MIN_R <= init[0] <= MAX_R) and not (MIN_V <= init[1] <= MAX_V):
+        return 'v_out'
+    elif not (MIN_R <= init[0] <= MAX_R) and not (MIN_V <= init[1] <= MAX_V):
+        return 'rv_out'
+    else:
+        raise ValueError('Unexpected case')
+def split_indices_parabola(init):
+    MIN_V = 1.0
+    MAX_V = 4.0
+    MIN_R = 0.7
+    MAX_R = 1.4
+    if init[0] < 0.6: # filter out dispearing balls
+        return 'invalid'
+    if init[1] == 0:
+        return 'zero'
+    elif MIN_R <= init[0] <= MAX_R and MIN_V <= init[1] <= MAX_V:
+        return 'in'
+    elif not (MIN_R <= init[0] <= MAX_R) and MIN_V <= init[1] <= MAX_V:
+        return 'r_out'
+    elif (MIN_R <= init[0] <= MAX_R) and not (MIN_V <= init[1] <= MAX_V):
+        return 'v_out'
+    elif not (MIN_R <= init[0] <= MAX_R) and not (MIN_V <= init[1] <= MAX_V):
+        return 'rv_out'
+    else:
+        raise ValueError('Unexpected case')
+def split_indices_collision(init):
+    MIN_V = 1.0
+    MAX_V = 4.0
+    MIN_R = 0.5
+    MAX_R = 1.5
+    if init[0] <= 0.5 or init[1] <=0.5: # filter out dispearing balls
+        return 'invalid'
+    # r1, r2, v1, v2
+    if init[2] == 0 or init[3] == 0:
+        return 'zero'
+    elif (MIN_R <= init[0] <= MAX_R and MIN_R <= init[1] <= MAX_R) and \
+        (MIN_V <= init[2] <= MAX_V and MIN_V <= init[3] <= MAX_V):
+        return 'in'
+    elif not (MIN_R <= init[0] <= MAX_R and MIN_R <= init[1] <= MAX_R) and \
+        (MIN_V <= init[2] <= MAX_V and MIN_V <= init[3] <= MAX_V):
+        return 'r_out'
+    elif (MIN_R <= init[0] <= MAX_R and MIN_R <= init[1] <= MAX_R) and \
+        not (MIN_V <= init[2] <= MAX_V and MIN_V <= init[3] <= MAX_V):
+        return 'v_out'
+    elif not (MIN_R <= init[0] <= MAX_R and MIN_R <= init[1] <= MAX_R) and \
+        not (MIN_V <= init[2] <= MAX_V and MIN_V <= init[3] <= MAX_V):
+        return 'rv_out'
+    else:
+        raise ValueError('Unexpected case')

@@ -189,7 +189,7 @@ def predict(trajs_list, program, params, free_init=False, stride=1):
         assert len(pred_trajs) == len(trajs)
         pred_trajs_list.append(pred_trajs)
     return pred_trajs_list, params
-def evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False):
+def evaluate(pred_trajs_list, trajs_list, gt_positions_list, split_list, verbose=False):
     if verbose:
         if len(trajs_list[0][0]) == 1:
             plot_trajs_diff(trajs_list[0], pred_trajs_list[0], gt_positions_list[0])
@@ -200,8 +200,20 @@ def evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False):
     metrics, vel_err = zip(*[_metrics_fn(tpt, ot, fps=FPS, gt_positions=ogt) for tpt, ot, ogt in zip(pred_trajs_list, trajs_list, gt_positions_list)])
     metrics = [{k: np.nanmean([v[k] for v in mm.values()]) for k in list(mm.values())[0].keys()} for mm in metrics]
     vel_err = list(vel_err)
-    metrics = {k: np.nanmean([mm[k] for mm in metrics]) for k in metrics[0].keys()}
-    vel_err = {k: np.nanmean([v[k] for v in vel_err]) for k in vel_err[0].keys()}
+
+    splits = sorted(set(split_list))
+    splitted_metrics = {split: [metrics[i] for i, s in enumerate(split_list) if s == split] for split in splits}
+    splitted_metrics['all'] = metrics
+    if 'out' in ' '.join(splits):
+        splitted_metrics['out'] = [metrics[i] for i, s in enumerate(split_list) if 'out' in s]
+    splitted_vel_err = {split: [vel_err[i] for i, s in enumerate(split_list) if s == split] for split in splits}
+    splitted_vel_err['all'] = vel_err
+    if 'out' in ' '.join(splits):
+        splitted_vel_err['out'] = [vel_err[i] for i, s in enumerate(split_list) if 'out' in s]
+    pprint({split: len(metrics) for split, metrics in splitted_metrics.items()})
+
+    metrics = {split: {k: np.nanmean([mm[k] for mm in metrics]) for k in metrics[0].keys()} for split, metrics in splitted_metrics.items()}
+    vel_err = {split: {k: np.nanmean([v[k] for v in vel_err]) for k in vel_err[0].keys()} for split, vel_err in splitted_vel_err.items()}
     if verbose:
         pprint(metrics)
         pprint(vel_err)
@@ -243,9 +255,10 @@ def main():
     os.makedirs(outdir, exist_ok=True)
 
     train_data_list = [train_dataset[i] for i in range(args.batch_size)]
-    trajs_list, gt_positions_list = zip(*([(data['trajs'], data['gt_positions']) for data in train_data_list]))
+    trajs_list, gt_positions_list, split_list = zip(*([(data['trajs'], data['gt_positions'], data['split']) for data in train_data_list]))
     trajs_list = list(trajs_list)
     gt_positions_list = list(gt_positions_list)
+    split_list = list(split_list)
 
     program = get_program(args.dataset)
 
@@ -256,16 +269,17 @@ def main():
         params = program.fit(trajs_list, FPS, verbose=True, set_params={}, hyperparams_list=[optim_hyperparams,], batched=True, STRIDE=args.stride,)
     pred_trajs_list, params = predict(trajs_list, program, params, args.free_init, args.stride)
     pprint(params)
-    train_metrics = evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False,)
+    train_metrics = evaluate(pred_trajs_list, trajs_list, gt_positions_list, split_list, verbose=False,)
     pprint(train_metrics)
 
     test_data_list = [test_dataset[i] for i in range(len(test_dataset))]
     print(f'Test data size: {len(test_data_list)}')
-    trajs_list, gt_positions_list = zip(*([(data['trajs'], data['gt_positions']) for data in test_data_list]))
+    trajs_list, gt_positions_list, split_list = zip(*([(data['trajs'], data['gt_positions'], data['split']) for data in test_data_list]))
     trajs_list = list(trajs_list)
     gt_positions_list = list(gt_positions_list)
+    split_list = list(split_list)
     pred_trajs_list, _ = predict(trajs_list, program, params, args.free_init)
-    test_metrics = evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False,)
+    test_metrics = evaluate(pred_trajs_list, trajs_list, gt_positions_list, split_list, verbose=False,)
     pprint(test_metrics)
     with open(outname, 'w') as f:
         json.dump({
