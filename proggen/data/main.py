@@ -51,7 +51,7 @@ class Dataset:
 
         return {
             'trajs': trajs,
-            'frames': frames,
+            'frames': frames if not self.novideo else None,
         }
     def __iter__(self):
         for i in range(len(self)):

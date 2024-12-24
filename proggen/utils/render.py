@@ -6,6 +6,7 @@ import numpy as np
 from matplotlib import colormaps
 import pygame
 import cv2
+from skimage.draw import polygon, disk, polygon_perimeter
 
 def rotate_point(p, angle,):
     x, y = p
@@ -163,6 +164,103 @@ class OpenCVRender(object):
         # assert False
         return img
 
+    def close(self):
+        pass
+
+# PHYRE color mapping
+def _hex_to_ints(hex_string):
+    hex_string = hex_string.strip('#')
+    return (
+        int(hex_string[0:2], 16),
+        int(hex_string[2:4], 16),
+        int(hex_string[4:6], 16),
+    )
+_PHYRE_COLORS = {
+    'black': [0, 0, 0],
+    'white': [255, 255, 255],
+    'red': _hex_to_ints('f34f46'),
+    'green': _hex_to_ints('6bcebb'),
+    'blue': _hex_to_ints('1877f2'),
+    'purple': _hex_to_ints('4b4aa4'),
+    'gray': _hex_to_ints('b9cad2'),
+    'light_red': _hex_to_ints('fcdfe3'),
+}
+
+class SkimageRender(object):
+    def __init__(
+        self, screen_width, screen_height, ppm,
+        background_color = (255, 255, 255),
+    ):
+        self.screen_width = screen_width
+        self.screen_height = screen_height
+        self.ppm = ppm
+        self.background_color = background_color
+    def render(self, obs):
+        img = np.ones((self.screen_height, self.screen_width, 3), dtype=np.uint8) * self.background_color
+        img = img.astype(np.uint8)
+        for obj_name, obj in obs.items():
+            color = _PHYRE_COLORS[obj.color]
+            if obj.shape == 'circle':
+                rr, cc = disk((int(obj.position[1] * self.ppm), int(obj.position[0] * self.ppm)), int(obj.radius * self.ppm))
+                in_image_flag = (rr >= 0) & (rr < self.screen_height) & (cc >= 0) & (cc < self.screen_width)
+                rr, cc = rr[in_image_flag], cc[in_image_flag]
+                img[rr, cc] = color
+            elif obj.shape == 'polygon':
+                vertices = [rotate_point(v, obj.angle) for v in obj.vertices]
+                vertices = [(v[0] + obj.position[0], v[1] + obj.position[1]) for v in vertices]
+                vertices = [(int(v[0] * self.ppm), int(v[1] * self.ppm)) for v in vertices]
+                rr, cc = polygon([v[1] for v in vertices], [v[0] for v in vertices])
+                in_image_flag = (rr >= 0) & (rr < self.screen_height) & (cc >= 0) & (cc < self.screen_width)
+                rr, cc = rr[in_image_flag], cc[in_image_flag]
+                img[rr, cc] = color
+            elif obj.shape == 'edge':
+                vertices = [rotate_point(v, obj.angle) for v in obj.vertices]
+                vertices = [(v[0] + obj.position[0], v[1] + obj.position[1]) for v in vertices]
+                vertices = [(int(v[0] * self.ppm), int(v[1] * self.ppm)) for v in vertices]
+                rr, cc = polygon_perimeter([v[1] for v in vertices], [v[0] for v in vertices])
+                in_image_flag = (rr >= 0) & (rr < self.screen_height) & (cc >= 0) & (cc < self.screen_width)
+                rr, cc = rr[in_image_flag], cc[in_image_flag]
+                img[rr, cc] = color
+            else:
+                raise ValueError(f'Unknown shape: {obj.shape}')
+        img = img[::-1, :, :]
+        return img
+    def close(self):
+        pass
+
+class OpenCVPHYRERender(object):
+    def __init__(
+        self, screen_width, screen_height, ppm,
+        background_color = (255, 255, 255),
+    ):
+        self.screen_width = screen_width
+        self.screen_height = screen_height
+        self.ppm = ppm
+        self.background_color = background_color
+    def render(self, obs):
+        img = np.ones((self.screen_height, self.screen_width, 3), dtype=np.uint8) * self.background_color
+        img = img.astype(np.uint8)
+        for obj_name, obj in obs.items():
+            color = _PHYRE_COLORS[obj.color]
+            if obj.shape == 'circle':
+                cv2.circle(
+                    img, (int(obj.position[0] * self.ppm), int(obj.position[1] * self.ppm)),
+                    int(obj.radius * self.ppm), color, -1)
+            elif obj.shape == 'polygon':
+                vertices = [rotate_point(v, obj.angle) for v in obj.vertices]
+                vertices = [(v[0] + obj.position[0], v[1] + obj.position[1]) for v in vertices]
+                vertices = [(int(v[0] * self.ppm), int(v[1] * self.ppm)) for v in vertices]
+                cv2.fillPoly(img, [np.array(vertices)], color)
+                cv2.polylines(img, [np.array(vertices)], True, color, 2)
+            elif obj.shape == 'edge':
+                vertices = [rotate_point(v, obj.angle) for v in obj.vertices]
+                vertices = [(v[0] + obj.position[0], v[1] + obj.position[1]) for v in vertices]
+                vertices = [(int(v[0] * self.ppm), int(v[1] * self.ppm)) for v in vertices]
+                cv2.polylines(img, [np.array(vertices)], True, color)
+            else:
+                raise ValueError(f'Unknown shape: {obj.shape}')
+        img = img[::-1, :, :]
+        return img
     def close(self):
         pass
 

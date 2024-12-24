@@ -181,7 +181,8 @@ def predict(trajs_list, program, params, free_init=False):
         assert len(pred_trajs) == len(trajs)
         pred_trajs_list.append(pred_trajs)
     return pred_trajs_list, params
-def evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False):
+def evaluate(pred_trajs_list, trajs_list, frames_list, verbose=False):
+    assert False
     if verbose:
         if len(trajs_list[0][0]) == 1:
             plot_trajs_diff(trajs_list[0], pred_trajs_list[0], gt_positions_list[0])
@@ -216,8 +217,7 @@ def main():
 
     args = parser.parse_args()
 
-    train_dataset = Dataset(args.dataset, 'train', seed=0, novideo=True,)
-    test_dataset = Dataset(args.dataset, 'test', seed=0, novideo=True,)
+    train_dataset = Dataset(seed=0, novideo=True,)
 
     optim_hyperparams = {
         'loss_name': args.loss_name,
@@ -229,15 +229,14 @@ def main():
 
     curdir = osp.dirname(os.path.abspath(__file__))
     outdir = osp.join(curdir, 'results', osp.basename(__file__).replace('.py', ''))
-    outname = osp.join(outdir, f'{args.dataset}_bs{args.batch_size}' + ('_freeinit' if args.free_init else '') + '.json')
+    outname = osp.join(outdir, f'bs{args.batch_size}' + ('_freeinit' if args.free_init else '') + '.json')
     os.makedirs(outdir, exist_ok=True)
 
     train_data_list = [train_dataset[i] for i in range(args.batch_size)]
-    trajs_list, gt_positions_list = zip(*([(data['trajs'], data['gt_positions']) for data in train_data_list]))
-    trajs_list = list(trajs_list)
-    gt_positions_list = list(gt_positions_list)
+    trajs_list = [(data['trajs'],) for data in train_data_list]
+    frames_list = [data['frames'] for data in train_data_list]
 
-    program = get_program(args.dataset)
+    program = get_program()
 
     set_logger(outname.replace('.json', '.log'))
     if args.free_init:
@@ -246,16 +245,15 @@ def main():
         params = program.fit(trajs_list, FPS, verbose=True, set_params={}, hyperparams_list=[optim_hyperparams,], batched=True,)
     pred_trajs_list, params = predict(trajs_list, program, params, args.free_init)
     pprint(params)
-    train_metrics = evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False,)
+    train_metrics = evaluate(pred_trajs_list, trajs_list, frames_list, verbose=False,)
     pprint(train_metrics)
 
-    test_data_list = [test_dataset[i] for i in range(len(test_dataset))]
+    test_data_list = [train_dataset[-(i+1)] for i in range(0, 10)] # test on the last 10 data, just for now
     print(f'Test data size: {len(test_data_list)}')
-    trajs_list, gt_positions_list = zip(*([(data['trajs'], data['gt_positions']) for data in test_data_list]))
-    trajs_list = list(trajs_list)
-    gt_positions_list = list(gt_positions_list)
+    trajs_list = [(data['trajs'],) for data in test_data_list]
+    frames_list = [data['frames'] for data in test_data_list]
     pred_trajs_list, _ = predict(trajs_list, program, params, args.free_init)
-    test_metrics = evaluate(pred_trajs_list, trajs_list, gt_positions_list, verbose=False,)
+    test_metrics = evaluate(pred_trajs_list, trajs_list, frames_list, verbose=False,)
     pprint(test_metrics)
     with open(outname, 'w') as f:
         json.dump({
