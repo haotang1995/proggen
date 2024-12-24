@@ -41,7 +41,10 @@ class ContParams:
             self.params[i] = v
     def set_params(self, params):
         for name, values in params.items():
-            self.set_param(name, values)
+            if name in self.name2indices:
+                self.set_param(name, values)
+            else:
+                self.insert_param(name, values)
     def insert_param(self, name, values):
         assert isinstance(name, str)
         assert name not in self.name2indices, f"Name {name} already exists"
@@ -105,10 +108,10 @@ class MetaBox2DProgram:
         else:
             raise NotImplementedError
 
-        best_loss, best_params = 100, None
+        best_loss, best_params = 1000, None
         for hyperparams in hyperparams_list:
             params = _fit(cur_loss_fn, (self, trajs, fps, hyperparams['loss_name'], STRIDE, set_params, set_initial_state_params, nofit, oracle_nofit), verbose=verbose, **{k: v for k, v in hyperparams.items() if k != 'loss_name'})
-            loss = cur_loss_fn(params, self, trajs, fps, 'mse', nofit=nofit, oracle_nofit=oracle_nofit) # TODO: Set one unified loss function
+            loss = cur_loss_fn(params, self, trajs, fps, 'mse', STRIDE=STRIDE, set_params=set_params, nofit=nofit, oracle_nofit=oracle_nofit) # TODO: Set one unified loss function
             if loss < best_loss:
                 best_loss = loss
                 best_params = params
@@ -136,9 +139,9 @@ class MetaBox2DProgram:
         else:
             raise NotImplementedError
         for hyperparams in hyperparams_list:
-            initial_params = np.concatenate((np.random.rand(RANDOM_PARAM_NUM), initial_state_params.params))
+            initial_params = np.concatenate((np.random.rand(RANDOM_PARAM_NUM*100), initial_state_params.params))
             params = _fit(cur_loss_fn, (self, trajs, fps, hyperparams['loss_name'], STRIDE, set_params, set_initial_state_params), verbose=verbose, **{k: v for k, v in hyperparams.items() if k != 'loss_name'}, initial_params=initial_params)
-            loss = cur_loss_fn(params, self, trajs, fps, 'mse') # TODO: Set one unified loss function
+            loss = cur_loss_fn(params, self, trajs, fps, 'mse', STRIDE=STRIDE, set_params=set_params, ) # TODO: Set one unified loss function
             if loss < best_loss:
                 best_loss = loss
                 best_params = params
@@ -147,13 +150,11 @@ class Box2DProgram:
     def __init__(
         self,
         fixture_definitions,
-        contactable_graph,
         body_definitions,
         joint_definitions,
         #TODO: Add action & reward related
     ):
         self.fixture_definitions = fixture_definitions
-        self.contactable_graph = contactable_graph
         self.body_definitions = body_definitions
         self.joint_definitions = joint_definitions
     def _simulate(self, params, initial_state_params, initial_state, fps, max_time_steps, STRIDE=1, set_params=None, set_initial_state_params=None,):
@@ -180,7 +181,7 @@ class Box2DProgram:
         world = b2World(gravity=b2Vec2(*gravity), doSleep=True)
 
         fixture_definitions = {
-            fn: f.init_def(params, categoryBits=self.contactable_graph.query_category(fn), maskBits=self.contactable_graph.query_mask(fn))
+            fn: f.init_def(params,)
             for fn, f in self.fixture_definitions.items()
         }
         bodies = {
@@ -221,7 +222,7 @@ class Box2DProgram:
                                         max_tries=1, maxiter=int(100), early_stop_threshold=0.1, optimizer='Powell', initial_params=initial_state_params.params, verbose=False)
         return self._simulate(params, initial_state_params, partial_trajs[0], fps, max_time_steps, STRIDE=STRIDE, set_params=set_params, set_initial_state_params=set_initial_state_params,)
     def _get_initial_state_params(self, partial_trajs, fps, oracle_nofit=False,):
-        initial_state_params = ContParams(np.random.rand(RANDOM_PARAM_NUM))
+        initial_state_params = ContParams(np.random.rand(RANDOM_PARAM_NUM*100))
         for obj in sorted(partial_trajs[0]):
             if not oracle_nofit:
                 initial_state_params.insert_param(f'{obj}.position', partial_trajs[0][obj]['position'],)

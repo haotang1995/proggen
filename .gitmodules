@@ -1,0 +1,3 @@
+[submodule "video_metrics"]
+	path = video_metrics
+	url = https://github.com/JunyaoHu/common_metrics_on_video_quality.git

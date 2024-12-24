@@ -185,6 +185,13 @@ _PHYRE_COLORS = {
     'gray': _hex_to_ints('b9cad2'),
     'light_red': _hex_to_ints('fcdfe3'),
 }
+def save_video(frames, outname):
+    frames = np.array(frames) # (T, H, W, 3)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(outname, fourcc, 10, (frames.shape[2], frames.shape[1]))
+    for frame in frames:
+        out.write(frame)
+    out.release()
 
 class SkimageRender(object):
     def __init__(
@@ -227,6 +234,8 @@ class SkimageRender(object):
         return img
     def close(self):
         pass
+    def save_video(self, frames, outname):
+        save_video(frames, outname)
 
 class OpenCVPHYRERender(object):
     def __init__(
@@ -263,4 +272,6 @@ class OpenCVPHYRERender(object):
         return img
     def close(self):
         pass
+    def save_video(self, frames, outname):
+        save_video(frames, outname)
 

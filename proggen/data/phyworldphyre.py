@@ -140,7 +140,7 @@ class PhyworldPhyreWrapper(ObservationWrapper):
         SCREEN_WIDTH, SCREEN_HEIGHT = self.env.unwrapped.SCREEN_WIDTH, self.env.unwrapped.SCREEN_HEIGHT
         out[f'shape_{len(features)}_0'] = {
             'shape': 'polygon',
-            'color': 'black',
+            'color': 'white',
             'position': (0, 0),
             'angle': 0,
             'vertices': [
@@ -152,7 +152,7 @@ class PhyworldPhyreWrapper(ObservationWrapper):
         }
         out[f'shape_{len(features)}_1'] = {
             'shape': 'polygon',
-            'color': 'black',
+            'color': 'white',
             'position': (0, 0),
             'angle': 0,
             'vertices': [
@@ -164,7 +164,7 @@ class PhyworldPhyreWrapper(ObservationWrapper):
         }
         out[f'shape_{len(features)}_2'] = {
             'shape': 'polygon',
-            'color': 'black',
+            'color': 'white',
             'position': (0, 0),
             'angle': 0,
             'vertices': [
@@ -176,7 +176,7 @@ class PhyworldPhyreWrapper(ObservationWrapper):
         }
         out[f'shape_{len(features)}_3'] = {
             'shape': 'polygon',
-            'color': 'black',
+            'color': 'white',
             'position': (0, 0),
             'angle': 0,
             'vertices': [
@@ -187,8 +187,8 @@ class PhyworldPhyreWrapper(ObservationWrapper):
             ],
         }
         for shape in out.values():
-            shape['velocity'] = (0., 0.) if self.env.unwrapped.cur_step == 0 else 'NULL'
-            shape['angular_velocity'] = 0. if self.env.unwrapped.cur_step == 0 else 'NULL'
+            # shape['velocity'] = (0., 0.) if self.env.unwrapped.cur_step == 0 else 'NULL'
+            # shape['angular_velocity'] = 0. if self.env.unwrapped.cur_step == 0 else 'NULL'
             shape['position'] = tuple(p/self.env.unwrapped.PPM for p in shape['position'])
             if 'vertices' in shape:
                 shape['vertices'] = [tuple(p/self.env.unwrapped.PPM for p in v) for v in shape['vertices']]
